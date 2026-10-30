@@ -1,0 +1,24 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Godot 3 legacy / mono (กันไว้ ไม่มีผลถ้าไม่ใช้)
+.import/
+.mono/
+data_*/
+mono_crash.*.json
+
+# Export outputs
+export_presets.cfg
+*.exe
+*.pck
+*.zip
+build/
+
+# Editor / OS
+.vscode/
+.idea/
+*.tmp
+*.translation
+.DS_Store
+Thumbs.db

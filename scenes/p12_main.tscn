@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://ckq6qyy52f4ww"]
+
+[ext_resource type="Script" uid="uid://blattg32wqe0q" path="res://scripts/p_12_main.gd" id="1_01bp6"]
+
+[node name="P12Main" type="Node" unique_id=1162532877]
+script = ExtResource("1_01bp6")

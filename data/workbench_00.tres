@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="BuildingPieceData" format=3 uid="uid://dcnp8a4323o6v"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_goxh5"]
+[ext_resource type="Script" uid="uid://dywd30cufdk0u" path="res://systems/building_piece_data.gd" id="2_i3ine"]
+
+[resource]
+script = ExtResource("2_i3ine")
+size_in_cells = Vector2i(2, 1)
+category = 2
+id = &"workbench_00"
+display_name = "Workbench"
+item_type = 6
+metadata/_custom_type_script = "uid://dywd30cufdk0u"

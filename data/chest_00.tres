@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="BuildingPieceData" format=3 uid="uid://bsyx0ry8jtve0"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_rtxn3"]
+[ext_resource type="Script" uid="uid://dywd30cufdk0u" path="res://systems/building_piece_data.gd" id="2_k1t04"]
+
+[resource]
+script = ExtResource("2_k1t04")
+can_be_rotated = false
+category = 3
+id = &"chest_00"
+display_name = "Wooden Chest"
+item_type = 6
+metadata/_custom_type_script = "uid://dywd30cufdk0u"

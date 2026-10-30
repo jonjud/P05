@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="BuildingPieceData" format=3 uid="uid://bsiw3sxvy7ff"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_6bmly"]
+[ext_resource type="Script" uid="uid://dywd30cufdk0u" path="res://systems/building_piece_data.gd" id="2_l10gt"]
+
+[resource]
+script = ExtResource("2_l10gt")
+can_be_rotated = false
+id = &"floor_00"
+display_name = "Basic Floor"
+item_type = 6
+metadata/_custom_type_script = "uid://dywd30cufdk0u"

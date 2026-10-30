@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemData" format=3 uid="uid://bou6eghxfddd7"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_hultp"]
+[ext_resource type="Script" uid="uid://wluy6hnm1xdj" path="res://systems/item_data.gd" id="2_ws0nd"]
+
+[resource]
+script = ExtResource("2_ws0nd")
+id = &"fiber_00"
+display_name = "Basic Fiber"
+description = "The most basic fiber from plants."
+item_type = 0
+material_form = 1
+metadata/_custom_type_script = "uid://wluy6hnm1xdj"

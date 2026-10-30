@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ItemData" format=3 uid="uid://epkjcddghbie"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_0hvbk"]
+[ext_resource type="Script" uid="uid://wluy6hnm1xdj" path="res://systems/item_data.gd" id="2_k88g3"]
+
+[resource]
+script = ExtResource("2_k88g3")
+id = &"stone_00"
+display_name = "Small Stone"
+description = "A small stone that found universally on ground."
+metadata/_custom_type_script = "uid://wluy6hnm1xdj"

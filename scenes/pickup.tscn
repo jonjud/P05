@@ -1,0 +1,30 @@
+[gd_scene format=3 uid="uid://pr7e716wedn0"]
+
+[ext_resource type="Script" uid="uid://c8n5q8mxoctoe" path="res://scripts/pickup.gd" id="1_pg2rt"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_p1s84"]
+size = Vector2(100, 100)
+
+[node name="Pickup" type="Area2D" unique_id=1434228988]
+collision_layer = 2
+collision_mask = 3
+script = ExtResource("1_pg2rt")
+
+[node name="ColorRect" type="ColorRect" parent="." unique_id=1621824810]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -8.0
+offset_top = -8.0
+offset_right = 8.0
+offset_bottom = 8.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.9019608, 0.75686276, 0.98039216, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=901600824]
+shape = SubResource("RectangleShape2D_p1s84")
+
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]

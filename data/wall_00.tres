@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="BuildingPieceData" format=3 uid="uid://wm6cgg40j8ai"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_k30m2"]
+[ext_resource type="Script" uid="uid://dywd30cufdk0u" path="res://systems/building_piece_data.gd" id="2_0xfao"]
+
+[resource]
+script = ExtResource("2_0xfao")
+can_be_rotated = false
+category = 1
+id = &"wall_00"
+display_name = "Basic Wall"
+item_type = 6
+metadata/_custom_type_script = "uid://dywd30cufdk0u"

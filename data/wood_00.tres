@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ItemData" format=3 uid="uid://vwgyeroabvtr"]
+
+[ext_resource type="Script" uid="uid://bpgaer11x0u3d" path="res://systems/salvage_entry.gd" id="1_rq1e4"]
+[ext_resource type="Script" uid="uid://wluy6hnm1xdj" path="res://systems/item_data.gd" id="2_8r1fl"]
+
+[resource]
+script = ExtResource("2_8r1fl")
+id = &"wood_00"
+display_name = "Pine wood"
+description = "The weakest wood you can coolect , but it can create a lot more than you thimk."
+metadata/_custom_type_script = "uid://wluy6hnm1xdj"
