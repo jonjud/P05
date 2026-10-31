@@ -200,12 +200,14 @@ func _serve(id : int, req : Dictionary, local : bool) -> void:
 	if not accepted.has(id):
 		return
 	reqs += 1
+	var before : String = _dev_state() if dev_hash else ""
 	var res : Dictionary = logic.host_handle(id, req)
+	var moved : bool = res["accepted"] and res["result"]["done"] > 0
 	if not res["changed"].is_empty():
 		for p in accepted:
 			if p != 1: cli_delta.rpc_id(p, res["changed"])
 		inventories_changed.emit()
-	if res["accepted"] and res["result"]["done"] > 0:
+	if moved:
 		if req.get("op") == "gather":
 			for p in accepted:
 				if p != 1: cli_nodes.rpc_id(p, _nodes_payload())
@@ -218,6 +220,9 @@ func _serve(id : int, req : Dictionary, local : bool) -> void:
 	if dev_hash:
 		res["h"] = state_hash(logic.invs)
 		res["g"] = grid_hash(logic.grid.to_dict())
+		if not moved and _dev_state() != before:
+			inv_fail += 1
+			push_error("STATE CHANGED ON REJECT req=%s" % str(req))
 		if not logic.conserved():
 			inv_fail += 1
 			push_error("INVARIANT FAIL req=%s" % str(req))
@@ -301,3 +306,9 @@ func _apply_grid(d : Dictionary) -> void:
 		return
 	grid_view = r["grid"]
 	grid_changed.emit()
+
+func send_raw(req : Dictionary) -> void:   # dev: ส่งคำขอปลอมได้
+	srv_request.rpc_id(1, req)
+
+func _dev_state() -> String:
+	return state_hash(logic.invs) + grid_hash(logic.grid.to_dict()) + str(logic.nodes.hash())

@@ -5,6 +5,7 @@ var sync : PlayerSync
 var net : NetSession
 var pid : String = ""
 var quiet : bool = false
+var wf : WorldField
 var stat : Dictionary = {"n": 0, "won": 0, "diverge": 0}
 
 func _arg(a : PackedStringArray, key : String, def : String = "") -> String:
@@ -39,6 +40,8 @@ func _ready() -> void:
 	var fz : Callable = Callable()
 	if "--gfuzz" in a: fz = _gfuzz
 	elif "--bfuzz" in a: fz = _bfuzz
+	elif "--forge" in a: fz = _forge
+	elif "--dc" in a: fz = _dc
 	if fz.is_valid():
 		if "--host" in a:
 			net.player_joined.connect(func(_i : int, _p : String) -> void: fz.call(), CONNECT_ONE_SHOT)
@@ -67,22 +70,25 @@ func _on_status(s : int, _d : String) -> void:
 
 func _enter(spawn : Vector2) -> void:
 	sync.enter_world(self, spawn, pid)
-	var wf : WorldField = WorldField.new()
+	wf = WorldField.new()
 	sync.world.add_child(wf)
 	sync.world.move_child(wf, 0)
 	wf.setup(net, sync.local)
 	var bf : BuildField = BuildField.new()
 	sync.world.add_child(bf)
-	sync.world.move_child(bf, 1)   # วาดใต้ตัวผู้เล่น
+	sync.world.move_child(bf, 1)
 	bf.setup(net, sync.local, wf)
 
-func _on_joined(_id : int, _p : String) -> void:
+func _on_joined(_id : int, p : String) -> void:
 	sync.broadcast_roster()
+	if is_instance_valid(wf): wf.notice("%s เข้าร่วมแล้ว" % p)
 
-func _on_left(_id : int, _p : String) -> void:
+func _on_left(_id : int, p : String) -> void:
 	if net.logic != null:
-		print("[%s] SUMMARY reqs=%d invariant_fail=%d" % [pid, net.reqs, net.inv_fail])
+		var iv : Inventory = net.logic.invs.get(p)
+		print("[%s] SUMMARY left=%s reqs=%d invariant_fail=%d conserved=%s inv_hash=%s grid_hash=%s" % [pid, p, net.reqs, net.inv_fail, net.logic.conserved(), NetSession.state_hash({p: iv}) if iv != null else "-", NetSession.grid_hash(net.logic.grid.to_dict())])
 	sync.broadcast_roster()
+	if is_instance_valid(wf): wf.notice("%s ออกจากเกม" % p)
 
 func _on_result(res : Dictionary) -> void:
 	var r = res.get("result")
@@ -140,3 +146,92 @@ func _bfuzz() -> void:
 		w += 1
 		await get_tree().process_frame
 	print("[%s] BFUZZ sent=%d results=%d pending=%d won=%d diverge=%d frames=%d" % [pid, sent, stat["n"], sent - stat["n"], stat["won"], stat["diverge"], w])
+
+func _c(label : String, op : String, item : String, qty : Variant, src : String, dst : String, kind : String, exp : String, pv : int = 1) -> Dictionary:
+	return {"label": label, "pv": pv, "op": op, "item": item, "qty": qty, "src": src, "dst": dst, "kind": kind, "exp": exp}
+
+# dev: client ส่งคำขอปลอมตรง ๆ (ห้ามขยับตัว ให้อยู่จุด spawn) ทีละคำขอ รอผลก่อนส่งถัดไป
+func _forge() -> void:
+	await get_tree().create_timer(0.5).timeout
+	var other : String = ""
+	var w : int = 0
+	while other == "" and w < 300:
+		for id in sync.roster:
+			if sync.roster[id] != pid: other = sync.roster[id]
+		w += 1
+		await get_tree().process_frame
+	var cases : Array = [
+		_c("client add", "add", "wood_00", 5, "", pid, "net", "add_disabled"),
+		_c("remove จากคนอื่น", "remove", "wood_00", 1, other, "", "net", "denied"),
+		_c("transfer ต้นทางคนอื่น", "transfer", "stone_00", 1, other, pid, "net", "denied"),
+		_c("transfer ไปคนอื่น (D-22)", "transfer", "stone_00", 1, pid, other, "net", "player_transfer_denied"),
+		_c("qty เป็น float", "remove", "stone_00", 1.0, pid, "", "net", "bad_request"),
+		_c("qty ติดลบ", "remove", "stone_00", -5, pid, "", "res", "invalid_quantity"),
+		_c("item ปลอม", "remove", "nope_item", 1, pid, "", "res", "unknown_item"),
+		_c("cell เสีย", "place", "wall_00", 0, "x,y", "", "net", "bad_request"),
+		_c("cell ใหญ่เกิน", "place", "wall_00", 0, "99999999999,3", "", "net", "bad_request"),
+		_c("rot ผิด", "place", "wall_00", 7, "6,6", "", "res", "bad_rotation"),
+		_c("protocol ผิด", "remove", "stone_00", 1, pid, "", "net", "bad_protocol", 99),
+		_c("op ปลอม", "teleport", "", 0, "", "", "net", "bad_op"),
+		_c("node ไกลเกิน", "gather", "", 0, "f1", "", "net", "too_far"),
+		_c("node ไม่มี", "gather", "", 0, "nope", "", "net", "no_node"),
+		_c("chest ปลอม", "transfer", "stone_00", 1, pid, "chest_999", "net", "denied"),
+		_c("gather ปลอม item/qty", "gather", "stone_00", 999999, "w1", "", "res", "ok"),
+	]
+	var rid : int = 1000
+	var pass_n : int = 0
+	var fail_n : int = 0
+	for c in cases:
+		rid += 1
+		net.send_raw({"pv": c["pv"], "rid": rid, "op": c["op"], "item": c["item"], "qty": c["qty"], "src": c["src"], "dst": c["dst"]})
+		var r : Dictionary = await net.result_received
+		var got : String = str(r["net_reason"])
+		if c["kind"] == "res":
+			got = str(r["result"]["reason"]) if r["result"] != null else "REJECTED:" + got
+		if got == c["exp"]:
+			pass_n += 1
+		else:
+			fail_n += 1
+			print("[%s] FORGE FAIL %s: got=%s expected=%s" % [pid, c["label"], got, c["exp"]])
+	rid += 1
+	var d : Dictionary = {"pv": 1, "rid": rid, "op": "remove", "item": "wood_00", "qty": 0, "src": pid, "dst": ""}
+	net.send_raw(d)
+	await net.result_received
+	net.send_raw(d)
+	var r2 : Dictionary = await net.result_received
+	if str(r2["net_reason"]) == "duplicate_request": pass_n += 1
+	else:
+		fail_n += 1
+		print("[%s] FORGE FAIL rid ซ้ำ: got=%s" % [pid, r2["net_reason"]])
+	var inv : Inventory = net.my_inv()
+	if inv.count_of(&"wood_00") == 60 and inv.count_of(&"stone_00") == 50: pass_n += 1
+	else:
+		fail_n += 1
+		print("[%s] FORGE FAIL ของหลัง gather ปลอม wood=%d stone=%d" % [pid, inv.count_of(&"wood_00"), inv.count_of(&"stone_00")])
+	print("[%s] FORGE checks=%d pass=%d fail=%d" % [pid, pass_n + fail_n, pass_n, fail_n])
+
+# dev: ยิงคำขอรัว ๆ แล้วตัดการเชื่อมกลางทาง จากนั้น rejoin ด้วย pid เดิมในโปรเซสเดียว
+func _dc() -> void:
+	await get_tree().create_timer(0.5).timeout
+	var rng : RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = pid.hash()
+	var ids : Array = net.nodes_now().keys()
+	var pieces : Array = [&"floor_00", &"wall_00", &"workbench_00", &"chest_00"]
+	for i in 40:
+		var cell : String = "%d,%d" % [rng.randi_range(9, 13), rng.randi_range(11, 13)]
+		var k : int = rng.randi() % 3
+		if k == 0: net.send_request("place", pieces[rng.randi() % 4], 0, cell, "")
+		elif k == 1: net.send_request("gather", &"", 0, ids[rng.randi() % ids.size()], "")
+		else: net.send_request("demolish", &"", 0, cell, "")
+	for i in 3:
+		await get_tree().process_frame
+	net.reset()   # ตัดกลาง op
+	await get_tree().create_timer(1.0).timeout
+	net.join_host("127.0.0.1", pid)
+	var w : int = 0
+	while net.status != NetSession.Status.CONNECTED and w < 600:
+		w += 1
+		await get_tree().process_frame
+	await get_tree().create_timer(0.5).timeout
+	var inv : Inventory = net.my_inv()
+	print("[%s] DC rejoin inv_hash=%s grid_hash=%s" % [pid, NetSession.state_hash({pid: inv}) if inv != null else "-", NetSession.grid_hash(net.grid_view.to_dict())])

@@ -67,3 +67,6 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, n["pos"] + Vector2(-14, 28), str(n["amount"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
 	if not _target.is_empty():
 		draw_arc(_target["pos"], 22.0, 0, TAU, 24, Color(1, 1, 0), 2.0)
+
+func notice(t : String) -> void:
+	msg = t
