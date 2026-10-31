@@ -17,7 +17,9 @@ var reqs : int = 0
 var inv_fail : int = 0
 var _rid : int = 0
 var _resyncs : int = 0
-var _exp : Dictionary = {}        # dev: item -> ผลรวมที่ host สร้างผ่าน add_node
+signal grid_changed
+var grid_view : BuildGrid = BuildGrid.new()   # client: สำเนา grid จาก host
+var starter : Dictionary = {}   # test-only: ของเริ่มต้นของ inventory ใหม่ (host ตั้งใน p05_main)
 
 var db : ItemDatabase
 var logic : HostLogic
@@ -66,6 +68,7 @@ func reset() -> void:
 	logic = null
 	replicas.clear()
 	node_view.clear()
+	grid_view = BuildGrid.new()
 	_rid = 0
 	_resyncs = 0
 	_set_status(Status.IDLE)
@@ -75,6 +78,7 @@ func start_host(pid : String) -> bool:
 	my_pid = pid
 	logic = HostLogic.new()
 	logic.db = db
+	logic.starter = starter
 	var sh : Inventory = Inventory.new()
 	sh.owner_id = HostLogic.SHARED_ID
 	logic.invs[HostLogic.SHARED_ID] = sh
@@ -114,12 +118,13 @@ func hs_hello(pv : int, sig : String, pid : String) -> void:
 		return
 	accepted[id] = true
 	cli_welcome.rpc_id(id, pid)
-	cli_full.rpc_id(id, _snapshot(), _nodes_payload())
+	cli_full.rpc_id(id, _snapshot(), _nodes_payload(), logic.grid.to_dict())
 	for p in accepted:
 		if p != 1 and p != id:
 			cli_delta.rpc_id(p, {pid: logic.invs[pid].to_dict()})
 	inventories_changed.emit()
 	player_joined.emit(id, pid)
+
 
 func _on_left(id : int) -> void:
 	if logic == null:
@@ -179,20 +184,8 @@ func my_inv() -> Inventory:
 func nodes_now() -> Dictionary:
 	return _nodes_payload() if logic != null else node_view
 
-func note_nodes() -> void:   # dev: เรียกหลัง add_node ครบ ไว้ตรวจผลรวมคงที่
-	_exp.clear()
-	for k in logic.nodes:
-		var it : StringName = logic.nodes[k]["item"]
-		_exp[it] = _exp.get(it, 0) + logic.nodes[k]["amount"]
 
-func _conserved() -> bool:
-	for it in _exp:
-		var t : int = 0
-		for o in logic.invs: t += logic.invs[o].count_of(it)
-		for k in logic.nodes:
-			if logic.nodes[k]["item"] == it: t += logic.nodes[k]["amount"]
-		if t != _exp[it]: return false
-	return true
+
 
 func send_request(op : String, item : StringName, qty : int, src : String = "", dst : String = "") -> int:
 	_rid += 1
@@ -212,13 +205,20 @@ func _serve(id : int, req : Dictionary, local : bool) -> void:
 		for p in accepted:
 			if p != 1: cli_delta.rpc_id(p, res["changed"])
 		inventories_changed.emit()
-	if res["accepted"] and req.get("op") == "gather" and res["result"]["done"] > 0:
-		for p in accepted:
-			if p != 1: cli_nodes.rpc_id(p, _nodes_payload())
-		nodes_changed.emit()
+	if res["accepted"] and res["result"]["done"] > 0:
+		if req.get("op") == "gather":
+			for p in accepted:
+				if p != 1: cli_nodes.rpc_id(p, _nodes_payload())
+			nodes_changed.emit()
+		elif _touches_grid(req):
+			var gd : Dictionary = logic.grid.to_dict()
+			for p in accepted:
+				if p != 1: cli_grid.rpc_id(p, gd)
+			grid_changed.emit()
 	if dev_hash:
 		res["h"] = state_hash(logic.invs)
-		if not _conserved():
+		res["g"] = grid_hash(logic.grid.to_dict())
+		if not logic.conserved():
 			inv_fail += 1
 			push_error("INVARIANT FAIL req=%s" % str(req))
 	if local:
@@ -235,12 +235,13 @@ func srv_request(req : Dictionary) -> void:
 func srv_resync() -> void:
 	var id : int = multiplayer.get_remote_sender_id()
 	if multiplayer.is_server() and accepted.has(id):
-		cli_full.rpc_id(id, _snapshot(), _nodes_payload())
+		cli_full.rpc_id(id, _snapshot(), _nodes_payload(), logic.grid.to_dict())
 
 @rpc("authority", "call_remote", "reliable")
-func cli_full(snap : Dictionary, nodes : Dictionary) -> void:
+func cli_full(snap : Dictionary, nodes : Dictionary, grid : Dictionary) -> void:
 	_apply(snap, true)
 	node_view = nodes
+	_apply_grid(grid)
 	nodes_changed.emit()
 
 @rpc("authority", "call_remote", "reliable")
@@ -272,3 +273,31 @@ func _apply(d : Dictionary, full : bool) -> void:
 	else:
 		replicas.merge(fresh, true)
 	inventories_changed.emit()
+
+static func grid_hash(d : Dictionary) -> String:   # dev only
+	return JSON.stringify(d, "", true).sha256_text().left(12)
+
+static func _touches_grid(req : Dictionary) -> bool:
+	var op : String = req.get("op", "")
+	return op == "place" or op == "demolish" or (op == "transfer" and (str(req.get("src")).begins_with("chest_") or str(req.get("dst")).begins_with("chest_")))
+
+func grid_now() -> BuildGrid:
+	return logic.grid if logic != null else grid_view
+
+func next_rid() -> int:   # ให้ UI ลงทะเบียน rid ก่อนส่ง (host ตอบแบบ synchronous)
+	return _rid + 1
+
+@rpc("authority", "call_remote", "reliable")
+func cli_grid(d : Dictionary) -> void:
+	_apply_grid(d)
+
+func _apply_grid(d : Dictionary) -> void:
+	var r : Dictionary = BuildGrid.from_dict(d, db)
+	if not r["ok"]:
+		push_error("grid from_dict ล้ม: %s" % r["reason"])
+		if _resyncs < 3:
+			_resyncs += 1
+			srv_resync.rpc_id(1)
+		return
+	grid_view = r["grid"]
+	grid_changed.emit()

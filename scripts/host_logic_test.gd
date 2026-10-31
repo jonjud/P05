@@ -75,6 +75,7 @@ func _ready() -> void:
 	_gather()
 	_gather()
 	_gather_range()
+	_build()
 	_fuzz()
 	print("P-12 host logic: fails = ", fails)
 
@@ -192,3 +193,70 @@ func _gather_range() -> void:
 	_t("ในระยะ -> ได้", r["accepted"] and r["result"]["done"] == 10 and not s.nodes.has("r1"))
 	s.leave(2)
 	_t("leave ล้างตำแหน่ง", not s.positions.has(2))
+
+func _build() -> void:
+	var s := HostLogic.new()
+	s.db = h.db
+	s.starter = {&"wall_00": 5, &"chest_00": 2, &"stone_00": 50}
+	var sh := Inventory.new()
+	sh.owner_id = HostLogic.SHARED_ID
+	s.invs[HostLogic.SHARED_ID] = sh
+	s.join(1, "p_host")
+	s.join(2, "p_buddy")
+	_t("starter + minted", s.invs["p_buddy"].count_of(&"wall_00") == 5 and s.minted[&"wall_00"] == 10 and s.conserved())
+	var r : Dictionary = s.host_handle(1, _r("place", &"wall_00", 0, "3,3", ""))
+	_t("place ok", r["accepted"] and r["result"]["ok"] and s.grid.struct_count() == 1 and s.invs["p_host"].count_of(&"wall_00") == 4)
+	r = s.host_handle(2, _r("place", &"wall_00", 0, "3,3", ""))
+	_t("ตำแหน่งเดียวกัน คนที่สอง overlap ของไม่ลด", r["result"]["reason"] == BuildGrid.OVERLAP and s.invs["p_buddy"].count_of(&"wall_00") == 5 and s.grid.struct_count() == 1)
+	_t("ไม่มีชิ้นนี้", s.host_handle(2, _r("place", &"floor_00", 0, "5,5", ""))["result"]["reason"] == BuildGrid.NOT_ENOUGH)
+	_t("cell เสีย", s.host_handle(2, _r("place", &"wall_00", 0, "x,3", ""))["net_reason"] == &"bad_request")
+	_t("cell ใหญ่เกิน", s.host_handle(2, _r("place", &"wall_00", 0, "99999999999,3", ""))["net_reason"] == &"bad_request")
+	_t("rot ผิด", s.host_handle(2, _r("place", &"wall_00", 7, "6,6", ""))["result"]["reason"] == BuildGrid.BAD_ROTATION)
+	_t("นอกพื้นที่", s.host_handle(2, _r("place", &"wall_00", 0, "-1,3", ""))["result"]["reason"] == BuildGrid.OUT_OF_BOUNDS)
+	r = s.host_handle(2, _r("demolish", &"", 0, "3,3", ""))
+	_t("อีกคนรื้อได้ (D-25) ของคืนผู้รื้อ", r["result"]["ok"] and s.grid.struct_count() == 0 and s.invs["p_buddy"].count_of(&"wall_00") == 6 and s.conserved())
+	_t("รื้อที่ว่าง", s.host_handle(2, _r("demolish", &"", 0, "3,3", ""))["result"]["reason"] == BuildGrid.NO_STRUCTURE)
+	s.host_handle(1, _r("place", &"chest_00", 0, "10,12", ""))
+	var cid : String = s.grid.chest_ids()[0]
+	var cpos : Vector2 = Vector2(10 * 32 + 16, 12 * 32 + 16)
+	r = s.host_handle(1, _r("transfer", &"stone_00", 10, "p_host", cid))
+	_t("ไม่มีตำแหน่ง too_far", r["net_reason"] == &"too_far" and s.grid.chest(cid).count_of(&"stone_00") == 0)
+	s.positions[1] = cpos + Vector2(200, 0)
+	_t("ไกลเกิน too_far", s.host_handle(1, _r("transfer", &"stone_00", 10, "p_host", cid))["net_reason"] == &"too_far")
+	s.positions[1] = cpos + Vector2(40, 0)
+	s.positions[2] = cpos
+	r = s.host_handle(1, _r("transfer", &"stone_00", 10, "p_host", cid))
+	_t("ฝากได้", r["result"]["ok"] and s.grid.chest(cid).count_of(&"stone_00") == 10 and s.conserved())
+	r = s.host_handle(2, _r("transfer", &"stone_00", 4, cid, "p_buddy"))
+	_t("อีกคนหยิบได้", r["result"]["ok"] and s.invs["p_buddy"].count_of(&"stone_00") == 54 and s.grid.chest(cid).count_of(&"stone_00") == 6)
+	_t("chest->shared ถูกปฏิเสธ", s.host_handle(2, _r("transfer", &"stone_00", 1, cid, "shared_01"))["net_reason"] == &"denied")
+	_t("chest ปลอม", s.host_handle(2, _r("transfer", &"stone_00", 1, "p_buddy", "chest_999"))["net_reason"] == &"denied")
+	_t("remove กับ chest ไม่ได้", s.host_handle(2, _r("remove", &"stone_00", 1, cid))["net_reason"] == &"denied")
+	r = s.host_handle(2, _r("demolish", &"", 0, "10,12", ""))
+	_t("รื้อ chest ที่มีของ", r["result"]["reason"] == BuildGrid.CHEST_NOT_EMPTY and s.grid.chest(cid) != null and s.conserved())
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	s.positions[1] = cpos
+	s.positions[2] = cpos
+	var pcs : Array = [&"wall_00", &"chest_00"]
+	var bad : int = 0
+	for i in 300:
+		var who : int = [1, 2][rng.randi() % 2]
+		var mine : String = "p_host" if who == 1 else "p_buddy"
+		var cell : String = "%d,%d" % [rng.randi_range(9, 12), rng.randi_range(11, 13)]
+		var k : int = rng.randi() % 3
+		var res : Dictionary
+		if k == 0:
+			res = s.host_handle(who, _r("place", pcs[rng.randi() % 2], 0, cell, ""))
+		elif k == 1:
+			res = s.host_handle(who, _r("demolish", &"", 0, cell, ""))
+		else:
+			var cids : Array = s.grid.chest_ids()
+			if cids.is_empty(): continue
+			var c : String = cids[rng.randi() % cids.size()]
+			var q : int = rng.randi_range(0, 30)
+			res = s.host_handle(who, _r("transfer", &"stone_00", q, mine, c)) if rng.randi() % 2 == 0 else s.host_handle(who, _r("transfer", &"stone_00", q, c, mine))
+		if not s.conserved(): bad += 1
+		if res["accepted"] and res["result"]["reason"] == OpResult.INTERNAL: bad += 1
+	_t("fuzz build: conserved + ไม่เข้า INTERNAL", bad == 0)
+	_t("fuzz build: grid round-trip", BuildGrid.from_dict(s.grid.to_dict(), s.db)["grid"].to_dict() == s.grid.to_dict())

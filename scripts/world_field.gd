@@ -11,6 +11,7 @@ var local : CharacterBody2D
 var hud : Label
 var msg : String = ""
 var _target : Dictionary = {}
+var _mine : Dictionary = {}
 
 func setup(n : NetSession, player : CharacterBody2D) -> void:
 	net = n
@@ -23,6 +24,8 @@ func setup(n : NetSession, player : CharacterBody2D) -> void:
 	net.result_received.connect(_on_result)
 
 func _on_result(res : Dictionary) -> void:
+	if not _mine.erase(res["rid"]):
+		return
 	var why : String = String(res["net_reason"]) if not res["accepted"] else String(res["result"]["reason"])
 	msg = str(MSG.get(why, why))
 
@@ -50,6 +53,7 @@ func _process(_d : float) -> void:
 
 func _unhandled_input(e : InputEvent) -> void:
 	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_E and not _target.is_empty():
+		_mine[net.next_rid()] = true
 		net.send_request("gather", &"", 0, _target["ref"], "")
 
 func _draw() -> void:
