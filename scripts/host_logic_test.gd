@@ -73,6 +73,8 @@ func _ready() -> void:
 	_t("ปลายทางเต็ม", r["result"]["reason"] == OpResult.DESTINATION_FULL and _snap() == before)
 	_session()
 	_gather()
+	_gather()
+	_gather_range()
 	_fuzz()
 	print("P-12 host logic: fails = ", fails)
 
@@ -173,3 +175,20 @@ func _gather() -> void:
 	for k in s2.nodes:
 		rem += s2.nodes[k]["amount"]
 	_t("fuzz gather: ผลรวมคงที่ 1500", s2.invs["p_host"].count_of(W) + s2.invs["p_buddy"].count_of(W) + rem == 1500)
+
+func _gather_range() -> void:
+	var s := HostLogic.new()
+	s.db = h.db
+	s.join(1, "p_host")
+	s.join(2, "p_buddy")
+	s.add_node("r1", W, 10, Vector2(100, 100))
+	var r : Dictionary = s.host_handle(2, _r("gather", W, 0, "r1", ""))
+	_t("ไม่มีตำแหน่ง -> too_far", r["net_reason"] == &"too_far" and s.nodes.has("r1"))
+	s.positions[2] = Vector2(500, 100)
+	r = s.host_handle(2, _r("gather", W, 0, "r1", ""))
+	_t("ไกลเกิน -> too_far", r["net_reason"] == &"too_far" and s.nodes["r1"]["amount"] == 10)
+	s.positions[2] = Vector2(170, 100)
+	r = s.host_handle(2, _r("gather", W, 0, "r1", ""))
+	_t("ในระยะ -> ได้", r["accepted"] and r["result"]["done"] == 10 and not s.nodes.has("r1"))
+	s.leave(2)
+	_t("leave ล้างตำแหน่ง", not s.positions.has(2))

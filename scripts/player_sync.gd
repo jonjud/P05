@@ -9,7 +9,7 @@ var world : Node2D = null
 var local : CharacterBody2D = null
 var puppets : Dictionary = {}     # peer id -> Puppet
 var roster : Dictionary = {}      # peer id -> player_id
-var positions : Dictionary = {}   # host: peer id -> Vector2 (ไว้ตรวจระยะใน P05-07)
+#var positions : Dictionary = {}   # host: peer id -> Vector2 (ไว้ตรวจระยะใน P05-07)
 var names_visible : bool = true   # OQ-10-06: เปิดเป็นค่าเริ่มต้น กด N ปิด/เปิด
 var _t : float = 0.0
 
@@ -41,7 +41,7 @@ func leave_world() -> void:
 	local = null
 	puppets.clear()
 	roster.clear()
-	positions.clear()
+	#positions.clear()
 
 func _my_id() -> int:
 	return multiplayer.get_unique_id() if multiplayer.multiplayer_peer != null else 1
@@ -82,9 +82,9 @@ func srv_pos(pos : Vector2, face : Vector2) -> void:
 	var id : int = multiplayer.get_remote_sender_id()
 	if not net.logic.peers.has(id) or not _ok(pos, 100000.0) or not _ok(face, 1.5):
 		return
-	positions[id] = pos
+	net.logic.positions[id] = pos
 	if puppets.has(id):
-		puppets[id].set_target(pos, face)   # host ต้องเห็น puppet ของ client เองด้วย
+		puppets[id].set_target(pos, face)
 	for p in net.accepted:
 		if p != 1 and p != id:
 			cli_pos.rpc_id(p, id, pos, face)
@@ -111,14 +111,9 @@ func _physics_process(delta : float) -> void:
 	var pos : Vector2 = local.global_position
 	var face : Vector2 = local.get_facing()
 	if net.status == NetSession.Status.HOSTING:
-		positions[1] = pos
+		net.logic.positions[1] = pos
 		for id in net.accepted:
 			if id != 1:
 				cli_pos.rpc_id(id, 1, pos, face)
 	elif net.status == NetSession.Status.CONNECTED:
 		srv_pos.rpc_id(1, pos, face)
-
-func _unhandled_input(e : InputEvent) -> void:
-	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_N:
-		names_visible = not names_visible
-		get_tree().call_group("nameplate", "set_visible", names_visible)

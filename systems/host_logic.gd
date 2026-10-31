@@ -4,10 +4,12 @@ class_name HostLogic
 const PROTOCOL_VERSION : int = 1
 const SHARED_ID : String = "shared_01"
 const MAX_PLAYERS : int = 2   # รวม host (OQ-08-08)
+const GATHER_RANGE : float = 80.0   # กว้างกว่า InteractPick.RANGE (48) เผื่อ latency
 var db : ItemDatabase
 var invs : Dictionary = {}    # owner_id -> Inventory (host ถือของจริง)
 var peers : Dictionary = {}   # sender(peer id) -> player_id (D-23)
 var nodes : Dictionary = {}   # node_id -> {"item": StringName, "amount": int} (host ถือของจริง)
+var positions : Dictionary = {}   # sender -> Vector2 (PlayerSync เขียน) ไว้ตรวจระยะ
 var allow_client_add : bool = false   # D-24: production ปิด, harness/test เปิดเอง
 var _seen : Dictionary = {}   # sender -> {rid: true} (ล้างตอน leave)
 
@@ -55,12 +57,15 @@ func join(sender : int, pid : Variant) -> Dictionary:
 # Inventory อยู่ต่อ (reconnect ด้วย player_id เดิมได้ของเดิม) rid เริ่มใหม่ตาม peer ใหม่
 func leave(sender : int) -> void:
 	peers.erase(sender)
+	positions.erase(sender)
 	_seen.erase(sender)
 
-func add_node(node_id : String, item : StringName, amount : int) -> bool:
+func add_node(node_id : String, item : StringName, amount : int, pos : Variant = null) -> bool:
 	if node_id == "" or amount <= 0 or db == null or db.get_item(item) == null or nodes.has(node_id):
 		return false
 	nodes[node_id] = {"item": item, "amount": amount}
+	if typeof(pos) == TYPE_VECTOR2:
+		nodes[node_id]["pos"] = pos
 	return true
 
 # ตัวตนผู้ขอมาจาก peers[sender] ไม่ใช่จาก payload
@@ -112,6 +117,10 @@ func host_handle(sender : int, req : Dictionary) -> Dictionary:
 		"gather":    # D-24: host ให้ของเอง ไม่เชื่อ item/qty จาก client
 			var n : Dictionary = nodes.get(req["src"], {})
 			if n.is_empty(): return _err(rid, &"no_node")
+			if n.has("pos"):
+				var pp : Variant = positions.get(sender)
+				if typeof(pp) != TYPE_VECTOR2 or (pp as Vector2).distance_to(n["pos"]) > GATHER_RANGE:
+					return _err(rid, &"too_far")
 			res = invs[me].add_to_existing_stacks(db, n["item"], n["amount"])
 			if res["done"] > 0:
 				n["amount"] -= res["done"]

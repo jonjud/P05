@@ -7,6 +7,17 @@ enum Status { IDLE, HOSTING, JOINING, CONNECTED, FAILED }
 signal status_changed(status : int, detail : String)
 signal player_joined(sender : int, pid : String)
 signal player_left(sender : int, pid : String)
+signal inventories_changed
+signal nodes_changed
+signal result_received(res : Dictionary)
+var replicas : Dictionary = {}    # client: owner_id -> Inventory (host ใช้ logic.invs)
+var node_view : Dictionary = {}   # client: node_id -> {item, amount, pos}
+var dev_hash : bool = true        # dev only: ปิดใน release (INT-18)
+var reqs : int = 0
+var inv_fail : int = 0
+var _rid : int = 0
+var _resyncs : int = 0
+var _exp : Dictionary = {}        # dev: item -> ผลรวมที่ host สร้างผ่าน add_node
 
 var db : ItemDatabase
 var logic : HostLogic
@@ -53,6 +64,10 @@ func reset() -> void:
 	multiplayer.multiplayer_peer = null
 	accepted.clear()
 	logic = null
+	replicas.clear()
+	node_view.clear()
+	_rid = 0
+	_resyncs = 0
 	_set_status(Status.IDLE)
 
 # ---------- host ----------
@@ -99,6 +114,11 @@ func hs_hello(pv : int, sig : String, pid : String) -> void:
 		return
 	accepted[id] = true
 	cli_welcome.rpc_id(id, pid)
+	cli_full.rpc_id(id, _snapshot(), _nodes_payload())
+	for p in accepted:
+		if p != 1 and p != id:
+			cli_delta.rpc_id(p, {pid: logic.invs[pid].to_dict()})
+	inventories_changed.emit()
 	player_joined.emit(id, pid)
 
 func _on_left(id : int) -> void:
@@ -135,3 +155,120 @@ func cli_welcome(pid : String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func cli_rejected(why : String) -> void:
 	_set_status(Status.FAILED, why)
+
+static func state_hash(d : Dictionary) -> String:   # dev only
+	var o : Dictionary = {}
+	for k in d: o[k] = d[k].to_dict()
+	return JSON.stringify(o, "", true).sha256_text().left(12)
+
+func _snapshot() -> Dictionary:
+	var d : Dictionary = {}
+	for o in logic.invs: d[o] = logic.invs[o].to_dict()
+	return d
+
+func _nodes_payload() -> Dictionary:
+	var d : Dictionary = {}
+	for k in logic.nodes:
+		var n : Dictionary = logic.nodes[k]
+		d[k] = {"item": String(n["item"]), "amount": n["amount"], "pos": n.get("pos", Vector2.ZERO)}
+	return d
+
+func my_inv() -> Inventory:
+	return logic.invs.get(my_pid) if logic != null else replicas.get(my_pid)
+
+func nodes_now() -> Dictionary:
+	return _nodes_payload() if logic != null else node_view
+
+func note_nodes() -> void:   # dev: เรียกหลัง add_node ครบ ไว้ตรวจผลรวมคงที่
+	_exp.clear()
+	for k in logic.nodes:
+		var it : StringName = logic.nodes[k]["item"]
+		_exp[it] = _exp.get(it, 0) + logic.nodes[k]["amount"]
+
+func _conserved() -> bool:
+	for it in _exp:
+		var t : int = 0
+		for o in logic.invs: t += logic.invs[o].count_of(it)
+		for k in logic.nodes:
+			if logic.nodes[k]["item"] == it: t += logic.nodes[k]["amount"]
+		if t != _exp[it]: return false
+	return true
+
+func send_request(op : String, item : StringName, qty : int, src : String = "", dst : String = "") -> int:
+	_rid += 1
+	var req : Dictionary = {"pv": HostLogic.PROTOCOL_VERSION, "rid": _rid, "op": op, "item": String(item), "qty": qty, "src": src, "dst": dst}
+	if logic != null:
+		_serve(1, req, true)
+	else:
+		srv_request.rpc_id(1, req)
+	return _rid
+
+func _serve(id : int, req : Dictionary, local : bool) -> void:
+	if not accepted.has(id):
+		return
+	reqs += 1
+	var res : Dictionary = logic.host_handle(id, req)
+	if not res["changed"].is_empty():
+		for p in accepted:
+			if p != 1: cli_delta.rpc_id(p, res["changed"])
+		inventories_changed.emit()
+	if res["accepted"] and req.get("op") == "gather" and res["result"]["done"] > 0:
+		for p in accepted:
+			if p != 1: cli_nodes.rpc_id(p, _nodes_payload())
+		nodes_changed.emit()
+	if dev_hash:
+		res["h"] = state_hash(logic.invs)
+		if not _conserved():
+			inv_fail += 1
+			push_error("INVARIANT FAIL req=%s" % str(req))
+	if local:
+		result_received.emit(res)
+	else:
+		cli_result.rpc_id(id, res)
+
+@rpc("any_peer", "call_remote", "reliable")
+func srv_request(req : Dictionary) -> void:
+	if multiplayer.is_server():
+		_serve(multiplayer.get_remote_sender_id(), req, false)
+
+@rpc("any_peer", "call_remote", "reliable")
+func srv_resync() -> void:
+	var id : int = multiplayer.get_remote_sender_id()
+	if multiplayer.is_server() and accepted.has(id):
+		cli_full.rpc_id(id, _snapshot(), _nodes_payload())
+
+@rpc("authority", "call_remote", "reliable")
+func cli_full(snap : Dictionary, nodes : Dictionary) -> void:
+	_apply(snap, true)
+	node_view = nodes
+	nodes_changed.emit()
+
+@rpc("authority", "call_remote", "reliable")
+func cli_delta(changed : Dictionary) -> void:
+	_apply(changed, false)
+
+@rpc("authority", "call_remote", "reliable")
+func cli_nodes(nodes : Dictionary) -> void:
+	node_view = nodes
+	nodes_changed.emit()
+
+@rpc("authority", "call_remote", "reliable")
+func cli_result(res : Dictionary) -> void:
+	result_received.emit(res)
+
+func _apply(d : Dictionary, full : bool) -> void:
+	var fresh : Dictionary = {}
+	for o in d:
+		var r : Dictionary = Inventory.from_dict(d[o], db)
+		if not r["ok"]:
+			push_error("from_dict ล้ม %s: %s" % [o, r["reason"]])
+			if _resyncs < 3:
+				_resyncs += 1
+				srv_resync.rpc_id(1)
+			return
+		fresh[o] = r["inventory"]
+	if full:
+		replicas = fresh
+	else:
+		replicas.merge(fresh, true)
+	inventories_changed.emit()
