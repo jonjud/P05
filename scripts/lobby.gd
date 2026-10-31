@@ -73,6 +73,9 @@ func _on_status(s : int, detail : String) -> void:
 	leave_btn.disabled = not busy
 	ip_edit.editable = not busy
 	pid_edit.editable = not busy
+	if busy:
+		ip_edit.release_focus()
+		pid_edit.release_focus()
 	match s:
 		NetSession.Status.IDLE: status_lbl.text = "พร้อม"
 		NetSession.Status.HOSTING: status_lbl.text = "เป็น Host (%s)" % detail
